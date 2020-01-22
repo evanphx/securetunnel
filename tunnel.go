@@ -9,9 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/gorilla/websocket"
-	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/errors"
 )
 
@@ -46,8 +44,6 @@ func openMode(host, token, mode string) (*Tunnel, error) {
 	}
 
 	url := fmt.Sprintf("%s://%s/tunnel?role=%s", proto, host, mode)
-
-	hclog.L().Info("connecting to server", "url", url)
 
 	headers := http.Header{}
 
@@ -95,8 +91,6 @@ func Open(token string) (*Tunnel, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	spew.Dump(t)
 
 	switch t.Mode {
 	case SOURCE:

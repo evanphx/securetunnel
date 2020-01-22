@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/bbolt"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-hclog"
 	"github.com/pkg/errors"
@@ -53,6 +54,7 @@ type Server struct {
 	L    hclog.Logger
 	Host string
 	mux  *http.ServeMux
+	db   *bbolt.DB
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -60,17 +62,77 @@ type Server struct {
 	upgrader websocket.Upgrader
 }
 
-func NewServer(l hclog.Logger) (*Server, error) {
+type sessionData struct {
+	StartTime time.Time
+	Key       []byte
+}
+
+func NewServer(path string, l hclog.Logger) (*Server, error) {
+	opts := bbolt.DefaultOptions
+	db, err := bbolt.Open(path, 0644, opts)
+	if err != nil {
+		return nil, err
+	}
+
 	serv := &Server{
 		L:        l,
 		mux:      http.NewServeMux(),
+		db:       db,
 		sessions: map[string]*Session{},
 	}
 
 	serv.mux.HandleFunc("/create-tunnel", serv.createTunnel)
 	serv.mux.HandleFunc("/tunnel", serv.connectTunnel)
 
+	err = db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("sessions"))
+		if bucket == nil {
+			return nil
+		}
+
+		return bucket.ForEach(func(k, v []byte) error {
+			u, err := uuid.FromBytes(k)
+			if err != nil {
+				return err
+			}
+
+			serv.L.Info("loaded session", "id", u.String())
+
+			var sd sessionData
+
+			err = json.Unmarshal(v, &sd)
+			if err != nil {
+				return err
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Hour)
+
+			session := &Session{
+				startTime: sd.StartTime,
+				key:       sd.Key,
+				id:        u.String(),
+				ctx:       ctx,
+				cancel:    cancel,
+				commands:  make(chan SessionCommand),
+			}
+
+			serv.sessions[u.String()] = session
+
+			go serv.sessionMonitor(session)
+
+			return nil
+		})
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
 	return serv, nil
+}
+
+func (s *Server) Close() error {
+	return s.db.Close()
 }
 
 func (s *Server) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
@@ -168,6 +230,32 @@ func (s *Server) createTunnel(rw http.ResponseWriter, req *http.Request) {
 	s.sessions[sid] = session
 
 	go s.sessionMonitor(session)
+
+	err = s.db.Update(func(tx *bbolt.Tx) error {
+		bucket, err := tx.CreateBucketIfNotExists([]byte("sessions"))
+		if err != nil {
+			return err
+		}
+
+		data, err := json.Marshal(sessionData{
+			StartTime: session.startTime,
+			Key:       session.key,
+		})
+
+		if err != nil {
+			return err
+		}
+
+		return bucket.Put(u.Bytes(), data)
+	})
+
+	if err != nil {
+		s.L.Error("error saving session data", "error", err)
+	}
+
+	s.L.Info("persisted session", "id", u.String())
+
+	s.db.Sync()
 
 	s.mu.Unlock()
 
@@ -458,8 +546,6 @@ func (s *Server) connectTunnel(rw http.ResponseWriter, req *http.Request) {
 			case STATUS_REQUEST:
 				s.sendStatus(session, conn)
 			default:
-				fmt.Printf("<< %s (%d) %+v\n", req.RemoteAddr, target, data)
-
 				select {
 				case <-session.ctx.Done():
 					return

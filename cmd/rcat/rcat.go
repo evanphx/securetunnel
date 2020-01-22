@@ -15,7 +15,7 @@ import (
 
 var (
 	fToken = flag.String("token", "", "the access token")
-	fGen   = flag.Bool("gen", false, "generate a new tunnel and output details")
+	fGen   = flag.String("gen", "", "generate a new tunnel against server and output details")
 	fDesc  = flag.String("desc", "", "description to apply to the tunnel when created")
 	fJson  = flag.Bool("json", false, "output gen results in json")
 )
@@ -23,8 +23,9 @@ var (
 func main() {
 	flag.Parse()
 
-	if *fGen {
+	if *fGen != "" {
 		var opts securetunnel.TunnelOptions
+		opts.Host = *fGen
 
 		if *fDesc != "" {
 			opts.Description = *fDesc
@@ -76,7 +77,6 @@ func main() {
 
 	signal.Notify(sig, syscall.SIGUSR1)
 
-	fmt.Printf("forwarding data...\n")
 	go io.Copy(tun, os.Stdin)
 	io.Copy(os.Stdout, tun)
 }

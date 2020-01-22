@@ -2,11 +2,13 @@ package securetunnel
 
 import (
 	"encoding/json"
+	fmt "fmt"
 	"net/http"
+	strings "strings"
 )
 
 type TunnelOptions struct {
-	Region      string
+	Host        string
 	Tags        map[string]string
 	Description string
 }
@@ -19,7 +21,15 @@ type TunnelParams struct {
 }
 
 func CreateTunnel(opts TunnelOptions) (*TunnelParams, error) {
-	resp, err := http.Get("http://localhost:24100/create-tunnel")
+	host := opts.Host
+
+	scheme := "https"
+
+	if host == "localhost" || strings.HasPrefix(host, "localhost:") {
+		scheme = "http"
+	}
+
+	resp, err := http.Get(fmt.Sprintf("%s://%s/create-tunnel", scheme, host))
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ module github.com/hashicorp/securetunnel
 go 1.13
 
 require (
+	github.com/coreos/bbolt v1.3.3
 	github.com/davecgh/go-spew v1.1.1
 	github.com/gogo/protobuf v1.3.1
 	github.com/gorilla/websocket v1.4.1
