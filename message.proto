@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package securetunnel;
+
+message Message {
+    Type    type         = 1;
+    bytes   payload      = 2;
+
+    enum Type {
+        UNKNOWN = 0;
+        DATA = 1;
+        CONNECTED = 2;
+        DISCONNECTED = 3;
+        SESSION_START = 4;
+        SESSION_CONT = 5;
+        STATUS_REQUEST = 6;
+        STATUS = 7;
+    }
+}
+
+message Token {
+    bytes id = 1;
+    Mode mode = 2;
+    string host = 3;
+
+    enum Mode {
+        UNKNOWN_MODE = 0;
+        SOURCE = 1;
+        DESTINATION = 2;
+    }
+}
+
+message Status {
+    int64 data_transfered = 1;
+    int64 lifetime = 2;
+}
