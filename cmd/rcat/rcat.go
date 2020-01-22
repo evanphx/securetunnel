@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	fToken = flag.String("token", "", "the access token")
-	fGen   = flag.String("gen", "", "generate a new tunnel against server and output details")
-	fDesc  = flag.String("desc", "", "description to apply to the tunnel when created")
-	fJson  = flag.Bool("json", false, "output gen results in json")
+	fToken  = flag.String("token", "", "the access token")
+	fGen    = flag.String("gen", "", "generate a new tunnel against server and output details")
+	fDesc   = flag.String("desc", "", "description to apply to the tunnel when created")
+	fJson   = flag.Bool("json", false, "output gen results in json")
+	fDelete = flag.Bool("delete", false, "delete the tunnel")
 )
 
 func main() {
@@ -52,6 +53,14 @@ func main() {
 			fmt.Printf("Tunnel:            %s / %s\n", params.TunnelID, params.TunnelARN)
 			fmt.Printf("Source Token:      %s\n", params.SourceToken)
 			fmt.Printf("Destination Token: %s\n", params.DestinationToken)
+		}
+		return
+	}
+
+	if *fDelete {
+		err := securetunnel.DeleteTunnel(*fToken)
+		if err != nil {
+			log.Fatal(err)
 		}
 		return
 	}

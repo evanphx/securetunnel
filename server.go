@@ -40,7 +40,7 @@ type Session struct {
 	cancel context.CancelFunc
 
 	key    []byte
-	id     string
+	id     uuid.UUID
 	mu     sync.Mutex
 	source *websocket.Conn
 	dest   *websocket.Conn
@@ -105,12 +105,17 @@ func NewServer(path string, l hclog.Logger) (*Server, error) {
 				return err
 			}
 
+			// Skip any expired sessions
+			if time.Since(sd.StartTime) > 12*time.Hour {
+				return nil
+			}
+
 			ctx, cancel := context.WithTimeout(context.Background(), 12*time.Hour)
 
 			session := &Session{
 				startTime: sd.StartTime,
 				key:       sd.Key,
-				id:        u.String(),
+				id:        u,
 				ctx:       ctx,
 				cancel:    cancel,
 				commands:  make(chan SessionCommand),
@@ -221,7 +226,7 @@ func (s *Server) createTunnel(rw http.ResponseWriter, req *http.Request) {
 	session := &Session{
 		startTime: time.Now(),
 		key:       key,
-		id:        sid,
+		id:        u,
 		ctx:       ctx,
 		cancel:    cancel,
 		commands:  make(chan SessionCommand),
@@ -274,6 +279,29 @@ func (s *Server) createTunnel(rw http.ResponseWriter, req *http.Request) {
 	fmt.Printf("Created tunnel: %s\n", sid)
 }
 
+func (s *Server) deleteTunnel(rw http.ResponseWriter, req *http.Request) {
+	tid := req.Header.Get("access-token")
+
+	session, _, err := s.decodeToken(tid)
+
+	if err != nil {
+		if err == ErrUnknownSession {
+			http.Error(rw, "unknown tunnel", 404)
+			return
+		} else {
+			s.httpError(rw, "internal error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session.cancel()
+
+	rw.WriteHeader(204)
+}
+
 func (s *Server) sessionMonitor(sess *Session) {
 	sess.mu.Lock()
 
@@ -284,7 +312,7 @@ func (s *Server) sessionMonitor(sess *Session) {
 
 	sess.mu.Unlock()
 
-	fmt.Printf("monitoring session: %s\n", sess.id)
+	fmt.Printf("monitoring session: %s\n", sess.id.String())
 
 	for {
 		select {
@@ -297,6 +325,18 @@ func (s *Server) sessionMonitor(sess *Session) {
 			if sess.dest != nil {
 				sess.dest.Close()
 			}
+
+			delete(s.sessions, sess.id.String())
+
+			s.db.Update(func(tx *bbolt.Tx) error {
+				bucket := tx.Bucket([]byte("sessions"))
+				if bucket == nil {
+					return nil
+				}
+
+				return bucket.Delete(sess.id.Bytes())
+			})
+
 			sess.mu.Unlock()
 			return
 		case cmd := <-cmds:
@@ -403,6 +443,12 @@ func (s *Server) sendStatus(sess *Session, conn *websocket.Conn) error {
 }
 
 func (s *Server) connectTunnel(rw http.ResponseWriter, req *http.Request) {
+	switch req.Method {
+	case "DELETE":
+		s.deleteTunnel(rw, req)
+		return
+	}
+
 	fmt.Printf("Tunnel connection: %s\n", req.RemoteAddr)
 
 	role := req.URL.Query().Get("role")

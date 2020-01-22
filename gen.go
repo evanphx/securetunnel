@@ -53,3 +53,40 @@ func CreateTunnel(opts TunnelOptions) (*TunnelParams, error) {
 
 	return &params, nil
 }
+
+func DeleteTunnel(str string) error {
+	token, _, _, err := DecodeToken(str)
+	if err != nil {
+		return err
+	}
+
+	host := token.Host
+
+	scheme := "https"
+
+	if host == "localhost" || strings.HasPrefix(host, "localhost:") {
+		scheme = "http"
+	}
+
+	url := fmt.Sprintf("%s://%s/tunnel", scheme, host)
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("access-token", str)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		return fmt.Errorf("error deleting tunnel: %d", resp.StatusCode)
+	}
+
+	return nil
+}

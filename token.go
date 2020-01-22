@@ -4,8 +4,11 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 
+	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
 )
+
+var ErrBadToken = errors.New("bad token")
 
 func DecodeToken(token string) (*Token, []byte, []byte, error) {
 	data, err := base64.RawURLEncoding.DecodeString(token)
@@ -13,7 +16,15 @@ func DecodeToken(token string) (*Token, []byte, []byte, error) {
 		return nil, nil, nil, err
 	}
 
+	if len(data) < 2 {
+		return nil, nil, nil, ErrBadToken
+	}
+
 	sz := binary.BigEndian.Uint16(data)
+
+	if len(data) < int(sz+2) {
+		return nil, nil, nil, ErrBadToken
+	}
 
 	body := data[2 : sz+2]
 
