@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -18,7 +17,9 @@ var fDB = flag.String("db", "./sessions.db", "path to sessions database file")
 func main() {
 	flag.Parse()
 
-	serv, err := securetunnel.NewServer(*fDB, hclog.L())
+	L := hclog.L().Named("tunserv")
+
+	serv, err := securetunnel.NewServer(*fDB, L)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,6 +34,6 @@ func main() {
 		os.Exit(1)
 	}()
 
-	fmt.Printf("Listening on %s\n", *fAddr)
+	L.Info("listening", "addr", *fAddr)
 	http.ListenAndServe(*fAddr, serv)
 }

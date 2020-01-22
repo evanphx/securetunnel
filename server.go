@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	fmt "fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -276,7 +275,7 @@ func (s *Server) createTunnel(rw http.ResponseWriter, req *http.Request) {
 
 	json.NewEncoder(rw).Encode(&response)
 
-	fmt.Printf("Created tunnel: %s\n", sid)
+	s.L.Info("created tunnel", "id", sid)
 }
 
 func (s *Server) deleteTunnel(rw http.ResponseWriter, req *http.Request) {
@@ -312,7 +311,7 @@ func (s *Server) sessionMonitor(sess *Session) {
 
 	sess.mu.Unlock()
 
-	fmt.Printf("monitoring session: %s\n", sess.id.String())
+	s.L.Info("monitoring session", "id", sess.id.String())
 
 	for {
 		select {
@@ -449,7 +448,7 @@ func (s *Server) connectTunnel(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	fmt.Printf("Tunnel connection: %s\n", req.RemoteAddr)
+	s.L.Info("tunnel connect", "remote-addr", req.RemoteAddr)
 
 	role := req.URL.Query().Get("role")
 
@@ -560,7 +559,7 @@ func (s *Server) connectTunnel(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	fmt.Printf("forwarding data for %s (%s)\n", req.RemoteAddr, role)
+	s.L.Info("forwarding data", "id", session.id.String(), "role", role)
 
 	for {
 		_, data, err := conn.ReadMessage()
