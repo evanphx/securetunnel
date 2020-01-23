@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/flynn/noise"
 	"github.com/hashicorp/securetunnel"
 )
 
@@ -19,6 +20,8 @@ var (
 	fDesc   = flag.String("desc", "", "description to apply to the tunnel when created")
 	fJson   = flag.Bool("json", false, "output gen results in json")
 	fDelete = flag.Bool("delete", false, "delete the tunnel")
+	fKey    = flag.String("key", "", "key to use to encrypt communications (source public or private depending on role)")
+	fGenKey = flag.Bool("gen-key", false, "generate a key to encrypt the session with")
 )
 
 func main() {
@@ -57,6 +60,18 @@ func main() {
 		return
 	}
 
+	if *fGenKey {
+		key, err := securetunnel.GenerateKey()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Printf("Private Key: %s\nPublic Key: %s\n",
+			securetunnel.PrivateKey(key),
+			securetunnel.PublicKey(key))
+		return
+	}
+
 	if *fDelete {
 		err := securetunnel.DeleteTunnel(*fToken)
 		if err != nil {
@@ -65,7 +80,28 @@ func main() {
 		return
 	}
 
-	tun, err := securetunnel.Open(*fToken)
+	token, _, _, err := securetunnel.DecodeToken(*fToken)
+
+	var (
+		key interface{}
+	)
+
+	if token.Mode == securetunnel.SOURCE {
+		if *fKey != "" {
+			pkey, err := securetunnel.ParsePrivateKey(*fKey)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			key = pkey
+		} else {
+			key = noise.DHKey{}
+		}
+	} else {
+		key = *fKey
+	}
+
+	tun, err := securetunnel.Open(*fToken, key)
 	if err != nil {
 		log.Fatal(err)
 	}

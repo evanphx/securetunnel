@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/flynn/noise"
 	"github.com/gorilla/websocket"
 	"github.com/pkg/errors"
 )
@@ -26,6 +27,10 @@ type Tunnel struct {
 
 	mu            sync.Mutex
 	statusWaiting chan *Message
+
+	hs      *noise.HandshakeState
+	writeCS *noise.CipherState
+	readCS  *noise.CipherState
 }
 
 var (
@@ -86,7 +91,7 @@ func openMode(host, token, mode string) (*Tunnel, error) {
 	}
 }
 
-func Open(token string) (*Tunnel, error) {
+func Open(token string, key interface{}) (*Tunnel, error) {
 	t, _, _, err := DecodeToken(token)
 	if err != nil {
 		return nil, err
@@ -94,16 +99,36 @@ func Open(token string) (*Tunnel, error) {
 
 	switch t.Mode {
 	case SOURCE:
-		return openSource(t.Host, token)
+		skey, ok := key.(noise.DHKey)
+		if !ok {
+			return nil, fmt.Errorf("key must be a noise.DHKey")
+		}
+
+		return openSource(t.Host, token, skey)
 	case DESTINATION:
-		return openDestination(t.Host, token)
+		skey, ok := key.(string)
+		if !ok {
+			return nil, fmt.Errorf("key must be a string")
+		}
+
+		return openDestination(t.Host, token, skey)
 	default:
 		return nil, errors.Wrapf(ErrAuthentication, "bad token")
 	}
 }
 
-func openSource(host, token string) (*Tunnel, error) {
+func openSource(host, token string, key noise.DHKey) (*Tunnel, error) {
 	tun, err := openMode(host, token, "source")
+	if err != nil {
+		return nil, err
+	}
+
+	err = tun.SourceSetup(key)
+	if err != nil {
+		return nil, err
+	}
+
+	sourceNego, err := tun.SourceNego()
 	if err != nil {
 		return nil, err
 	}
@@ -121,6 +146,7 @@ func openSource(host, token string) (*Tunnel, error) {
 
 	var rmsg Message
 	rmsg.Type = SESSION_START
+	rmsg.Payload = sourceNego
 
 	err = tun.sendMessage(&rmsg)
 	if err != nil {
@@ -138,11 +164,21 @@ func openSource(host, token string) (*Tunnel, error) {
 		return nil, errors.Wrapf(ErrProtocolError, "session wasn't continued by destination")
 	}
 
+	err = tun.SourceFinished(msg.Payload)
+	if err != nil {
+		return nil, err
+	}
+
 	return tun, nil
 }
 
-func openDestination(host, token string) (*Tunnel, error) {
+func openDestination(host, token string, key string) (*Tunnel, error) {
 	tun, err := openMode(host, token, "destination")
+	if err != nil {
+		return nil, err
+	}
+
+	err = tun.DestSetup(key)
 	if err != nil {
 		return nil, err
 	}
@@ -153,12 +189,18 @@ func openDestination(host, token string) (*Tunnel, error) {
 		return nil, err
 	}
 
+	destNego, err := tun.DestNego(msg.Payload)
+	if err != nil {
+		return nil, err
+	}
+
 	if msg.Type != SESSION_START {
 		return nil, errors.Wrapf(ErrProtocolError, "did not receive stream start")
 	}
 
 	var rmsg Message
 	rmsg.Type = SESSION_CONT
+	rmsg.Payload = destNego
 
 	err = tun.sendMessage(&rmsg)
 	if err != nil {
@@ -275,6 +317,11 @@ func (t *Tunnel) Read(buf []byte) (int, error) {
 
 		switch msg.Type {
 		case DATA:
+			msg.Payload, err = t.Decrypt(msg.Payload)
+			if err != nil {
+				return 0, err
+			}
+
 			// ok
 		case STATUS:
 			t.mu.Lock()
@@ -320,6 +367,8 @@ func (t *Tunnel) Write(buf []byte) (int, error) {
 			msg.Payload = buf
 			buf = nil
 		}
+
+		msg.Payload = t.Encrypt(msg.Payload)
 
 		err := t.sendMessage(&msg)
 		if err != nil {
